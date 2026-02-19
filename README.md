@@ -82,6 +82,8 @@ python setup.py
 ```
 2. Follow Instructions
 
+3. Go to Run The CodeS
+
 ### Manual
 
 1. Install Python dependencies:
@@ -97,7 +99,7 @@ cp Discord_scrape/.env.example Discord_scrape/.env
 cp Stoat_migration/.env.example Stoat_migration/.env
 ```
 
-3. Fill env values:
+3.a Fill env values for Discord:
 
 ```env
 # Discord_scrape/.env
@@ -109,13 +111,19 @@ DISCORD_MESSAGE_LIMIT=none
 - `none` (or empty): archive full history
 - positive integer (for example `100`): archive latest N messages per channel
 
+
+3.b Fill env values for Stoat 
 ```env
 # Stoat_migration/.env
 STOAT_TOKEN=your_stoat_bot_token
 STOAT_SERVER_ID=your_stoat_server_id
 ```
 
-4. Run the Discord scraper:
+## Run The Code:
+
+### Running The Discord Scraper
+
+1. Go to the Discord_scrape directory and run bot.py:
 
 ```bash
 cd Discord_scrape
@@ -124,26 +132,34 @@ python bot.py
 
 The bot will show all servers it is in and prompt you to pick exactly one server before scraping.
 
-5. Optional: inspect archived data:
+2. Optional: inspect archived data:
 
 ```bash
 python validate.py
 ```
 
-6. Run the Stoat importer:
-
-```bash
-cd ../Stoat_migration
-python importer.py
-```
-
-## Output
+#### Output
 
 After scraping:
 - `Discord_scrape/archives/<server_name>_<server_id>/discord_archive.db`
 - `Discord_scrape/archives/<server_name>_<server_id>/downloads/`
 
 This keeps each server isolated and avoids mixed archives.
+
+### Running the Stoat Importer
+
+1. Go to the Stoat_migration directory and run importer.py
+
+```bash
+# If you are still in \Discord_scrape>:
+# run: cd ..
+cd Stoat_migration
+python importer.py
+```
+2. The bot will show all servers that are scraped select the one you want to copy.
+
+#####  Make Sure the Server_ID is correct before importing! 
+
 
 ## What Gets Migrated
 
@@ -165,7 +181,7 @@ This keeps each server isolated and avoids mixed archives.
 | channels | All channels |
 | users | Message authors |
 | messages | Message content |
-| attachments | File metadata |
+| attachments | File metadata (None, bc discord doesn't save it either) |
 | redirects | Discord link rewrite mapping |
 
 ## Requirements
