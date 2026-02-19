@@ -148,6 +148,11 @@ def init_db(db_path):
             content TEXT,
             timestamp TEXT,
             has_attachments INTEGER DEFAULT 0,
+            reply_to_message_id TEXT,
+            reply_to_channel_id TEXT,
+            reply_to_author_id TEXT,
+            reply_to_author_username TEXT,
+            reply_to_content TEXT,
             FOREIGN KEY (channel_id) REFERENCES channels(id),
             FOREIGN KEY (author_id) REFERENCES users(id)
         )
@@ -182,9 +187,65 @@ def init_db(db_path):
     """
     )
 
+    ensure_messages_reply_columns(conn)
+
     conn.commit()
     conn.close()
     print(f"[DB] Database initialized: {db_path}")
+
+
+def ensure_messages_reply_columns(conn):
+    """
+    Backfill reply columns for existing archive DBs created before reply support.
+    """
+    c = conn.cursor()
+    existing = {row[1] for row in c.execute("PRAGMA table_info(messages)").fetchall()}
+    needed = {
+        "reply_to_message_id": "TEXT",
+        "reply_to_channel_id": "TEXT",
+        "reply_to_author_id": "TEXT",
+        "reply_to_author_username": "TEXT",
+        "reply_to_content": "TEXT",
+    }
+    for column, definition in needed.items():
+        if column in existing:
+            continue
+        c.execute(f"ALTER TABLE messages ADD COLUMN {column} {definition}")
+        print(f"[DB] Added messages.{column}")
+
+
+async def resolve_referenced_message(message):
+    """
+    Resolve reply target message. Prefer cached/resolved references, then fetch via API.
+    """
+    reference = message.reference
+    if not reference or not reference.message_id:
+        return None
+
+    resolved = getattr(reference, "resolved", None)
+    if isinstance(resolved, discord.Message):
+        return resolved
+
+    cached = getattr(reference, "cached_message", None)
+    if isinstance(cached, discord.Message):
+        return cached
+
+    channel_id = reference.channel_id or message.channel.id
+
+    target_channel = None
+    if message.guild is not None and channel_id is not None:
+        target_channel = message.guild.get_channel_or_thread(channel_id)
+
+    if target_channel is None and str(channel_id) == str(message.channel.id):
+        target_channel = message.channel
+
+    if target_channel is None or not hasattr(target_channel, "fetch_message"):
+        return None
+
+    try:
+        return await target_channel.fetch_message(reference.message_id)
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        return None
 
 
 async def download_attachment(session, url, filename, folder):
@@ -241,6 +302,7 @@ async def archive_channel(channel, conn, session, downloads_folder, channel_type
     print(f"  [->] Archiving {label}{channel.name} ({channel_type})...")
     count = 0
     redirect_count = 0
+    reply_cache = {}
 
     if MESSAGE_LIMIT is None:
         print("    [CFG] Message mode: full history")
@@ -261,8 +323,50 @@ async def archive_channel(channel, conn, session, downloads_folder, channel_type
 
         has_attachments = 1 if message.attachments else 0
 
+        reply_to_message_id = None
+        reply_to_channel_id = None
+        reply_to_author_id = None
+        reply_to_author_username = None
+        reply_to_content = None
+
+        if message.reference and message.reference.message_id:
+            reply_to_message_id = str(message.reference.message_id)
+            reply_to_channel_id = str(message.reference.channel_id or channel.id)
+
+            cache_key = (reply_to_channel_id, reply_to_message_id)
+            if cache_key in reply_cache:
+                referenced_message = reply_cache[cache_key]
+            else:
+                referenced_message = await resolve_referenced_message(message)
+                reply_cache[cache_key] = referenced_message
+
+            if referenced_message:
+                reply_to_author_id = str(referenced_message.author.id)
+                reply_to_author_username = str(referenced_message.author.name)
+                reply_to_content = referenced_message.content or ""
+                if not reply_to_content and referenced_message.attachments:
+                    reply_to_content = "[Attachment]"
+
         c.execute(
-            "INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)",
+            """
+            INSERT INTO messages (
+                id, channel_id, guild_id, author_id, content, timestamp, has_attachments,
+                reply_to_message_id, reply_to_channel_id, reply_to_author_id,
+                reply_to_author_username, reply_to_content
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                channel_id = excluded.channel_id,
+                guild_id = excluded.guild_id,
+                author_id = excluded.author_id,
+                content = excluded.content,
+                timestamp = excluded.timestamp,
+                has_attachments = excluded.has_attachments,
+                reply_to_message_id = COALESCE(excluded.reply_to_message_id, messages.reply_to_message_id),
+                reply_to_channel_id = COALESCE(excluded.reply_to_channel_id, messages.reply_to_channel_id),
+                reply_to_author_id = COALESCE(excluded.reply_to_author_id, messages.reply_to_author_id),
+                reply_to_author_username = COALESCE(excluded.reply_to_author_username, messages.reply_to_author_username),
+                reply_to_content = COALESCE(excluded.reply_to_content, messages.reply_to_content)
+            """,
             (
                 str(message.id),
                 str(channel.id),
@@ -271,6 +375,11 @@ async def archive_channel(channel, conn, session, downloads_folder, channel_type
                 message.content,
                 message.created_at.isoformat(),
                 has_attachments,
+                reply_to_message_id,
+                reply_to_channel_id,
+                reply_to_author_id,
+                reply_to_author_username,
+                reply_to_content,
             ),
         )
 

@@ -1,5 +1,4 @@
 import asyncio
-from pyexpat.errors import messages
 import aiohttp
 import sqlite3
 import os
@@ -171,6 +170,41 @@ def replace_discord_user_mentions(content, user_lookup):
     return DISCORD_USER_MENTION_RE.sub(_replace, content)
 
 
+def get_table_columns(cursor, table_name):
+    """
+    Return all column names for a SQLite table.
+    """
+    return {row[1] for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()}
+
+
+def build_preview_text(text, max_chars):
+    """
+    Normalize whitespace and return a capped preview string.
+    """
+    if not text:
+        return ""
+    compact = " ".join(text.split())
+    return compact[:max_chars]
+
+
+def format_reply_context(msg, user_lookup):
+    """
+    Build one-line reply context from archived metadata.
+    """
+    reply_message_id = msg.get("reply_to_message_id")
+    if not reply_message_id:
+        return ""
+
+    author = (
+        msg.get("reply_to_author_username")
+        or user_lookup.get(str(msg.get("reply_to_author_id") or ""))
+        or "unknown-user"
+    )
+    raw_content = replace_discord_user_mentions(msg.get("reply_to_content") or "", user_lookup)
+    preview = build_preview_text(raw_content, REPLY_PREVIEW_MAX_CHARS) or "[no text]"
+    return f"> Reply to @{author}: {preview}"
+
+
 async def fetch_autumn_url(session):
     """
     Fetch the correct file upload (Autumn) URL from the Stoat API root endpoint.
@@ -322,40 +356,101 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
     # Store the Discord→Stoat channel mapping
     discord_to_stoat_channel[discord_channel_id] = stoat_channel_id
 
-    # Fetch all messages for this channel, oldest first
-    rows = c.execute("""
-        SELECT m.id, m.author_id, m.content, m.timestamp,
-               u.username,
-               a.local_path, a.filename, a.url, a.content_type, a.size
-        FROM messages m
-        JOIN users u ON m.author_id = u.id
-        LEFT JOIN attachments a ON a.message_id = m.id
-        WHERE m.channel_id = ?
-        ORDER BY m.timestamp ASC
-    """, (discord_channel_id,)).fetchall()
+    message_columns = get_table_columns(c, "messages")
+    has_reply_metadata = {
+        "reply_to_message_id",
+        "reply_to_channel_id",
+        "reply_to_author_id",
+        "reply_to_author_username",
+        "reply_to_content",
+    }.issubset(message_columns)
 
-    # Group attachments by message ID
+    # Fetch all messages for this channel, oldest first.
+    if has_reply_metadata:
+        rows = c.execute(
+            """
+            SELECT
+                m.id, m.author_id, m.content, m.timestamp, u.username,
+                m.reply_to_message_id, m.reply_to_channel_id, m.reply_to_author_id,
+                m.reply_to_author_username, m.reply_to_content
+            FROM messages m
+            JOIN users u ON m.author_id = u.id
+            WHERE m.channel_id = ?
+            ORDER BY m.timestamp ASC
+            """,
+            (discord_channel_id,),
+        ).fetchall()
+    else:
+        rows = c.execute(
+            """
+            SELECT m.id, m.author_id, m.content, m.timestamp, u.username
+            FROM messages m
+            JOIN users u ON m.author_id = u.id
+            WHERE m.channel_id = ?
+            ORDER BY m.timestamp ASC
+            """,
+            (discord_channel_id,),
+        ).fetchall()
+
     messages = {}
     for row in rows:
-        msg_id, author_id, content, timestamp, username, \
-            local_path, filename, url, content_type, size = row
+        if has_reply_metadata:
+            (
+                msg_id,
+                author_id,
+                content,
+                timestamp,
+                username,
+                reply_to_message_id,
+                reply_to_channel_id,
+                reply_to_author_id,
+                reply_to_author_username,
+                reply_to_content,
+            ) = row
+        else:
+            msg_id, author_id, content, timestamp, username = row
+            reply_to_message_id = None
+            reply_to_channel_id = None
+            reply_to_author_id = None
+            reply_to_author_username = None
+            reply_to_content = None
 
-        if msg_id not in messages:
-            messages[msg_id] = {
-                "author_id": author_id,
-                "username": username,
-                "content": content or "",
-                "timestamp": timestamp,
-                "attachments": []
-            }
-        if filename:
-            messages[msg_id]["attachments"].append({
+        messages[msg_id] = {
+            "author_id": author_id,
+            "username": username,
+            "content": content or "",
+            "timestamp": timestamp,
+            "attachments": [],
+            "reply_to_message_id": reply_to_message_id,
+            "reply_to_channel_id": reply_to_channel_id,
+            "reply_to_author_id": reply_to_author_id,
+            "reply_to_author_username": reply_to_author_username,
+            "reply_to_content": reply_to_content,
+        }
+
+    attachment_rows = c.execute(
+        """
+        SELECT a.message_id, a.local_path, a.filename, a.url, a.content_type, a.size
+        FROM attachments a
+        JOIN messages m ON m.id = a.message_id
+        WHERE m.channel_id = ?
+        ORDER BY a.id ASC
+        """,
+        (discord_channel_id,),
+    ).fetchall()
+
+    for message_id, local_path, filename, url, content_type, size in attachment_rows:
+        if not filename or message_id not in messages:
+            continue
+        messages[message_id]["attachments"].append(
+            {
                 "local_path": local_path,
                 "filename": filename,
                 "url": url,
                 "content_type": content_type,
-                "size": size or 0
-            })
+                "size": size or 0,
+            }
+        )
 
     if not messages:
         print(f"  [INFO] No messages in {label}{discord_channel_name}")
@@ -388,6 +483,7 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
         author_name = msg["username"] or "unknown-user"
         header = f"``{author_name} at: {date_str}``" if show_header else ""
         body = replace_discord_user_mentions(msg["content"], user_lookup)
+        reply_context = format_reply_context(msg, user_lookup)
 
 
         # Process attachments — upload directly from local file,
@@ -427,7 +523,16 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
 
         # Build full message — Discord links are left as-is for now,
         # the redirect pass will rewrite them after all messages are sent
-        full_parts = [part for part in (header, body, "\n".join(extra_links)) if part]
+        full_parts = [
+            part
+            for part in (
+                header,
+                reply_context,
+                body,
+                "\n".join(extra_links),
+            )
+            if part
+        ]
         full_message = "\n".join(full_parts)
 
         # Stoat 2000 char limit
