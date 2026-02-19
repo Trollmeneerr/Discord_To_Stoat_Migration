@@ -71,32 +71,33 @@ Discord_To_Stoat_Migration/
 - `Send Messages`
 6. Copy your Stoat Server ID from right clicking server icon. (You might need to enable this feature is advanced setting in your profile) 
 
+---
 ### 3. Configure the project
 
-### Automatic
+#### Automatic
 
 1. Run:
 
 ```bash
-python setup.py
+   python setup.py
 ```
 2. Follow Instructions
 
-3. Go to Run The CodeS
+3. Go to https://github.com/Trollmeneerr/Discord_To_Stoat_Migration?tab=readme-ov-file#run-the-code
 
-### Manual
+#### Manual
 
 1. Install Python dependencies:
 
 ```bash
-pip install -r requirements.txt
+   pip install -r requirements.txt
 ```
 
 2. Create env files:
 
 ```bash
-cp Discord_scrape/.env.example Discord_scrape/.env
-cp Stoat_migration/.env.example Stoat_migration/.env
+   cp Discord_scrape/.env.example Discord_scrape/.env
+   cp Stoat_migration/.env.example Stoat_migration/.env
 ```
 
 3.a Fill env values for Discord:
@@ -126,8 +127,8 @@ STOAT_SERVER_ID=your_stoat_server_id
 1. Go to the Discord_scrape directory and run bot.py:
 
 ```bash
-cd Discord_scrape
-python bot.py
+   cd Discord_scrape
+   python bot.py
 ```
 
 The bot will show all servers it is in and prompt you to pick exactly one server before scraping.
@@ -135,7 +136,7 @@ The bot will show all servers it is in and prompt you to pick exactly one server
 2. Optional: inspect archived data:
 
 ```bash
-python validate.py
+   python validate.py
 ```
 
 #### Output
@@ -151,10 +152,10 @@ This keeps each server isolated and avoids mixed archives.
 1. Go to the Stoat_migration directory and run importer.py
 
 ```bash
-# If you are still in \Discord_scrape>:
-# run: cd ..
-cd Stoat_migration
-python importer.py
+   # If you are still in \Discord_scrape>:
+   # run: cd ..
+   cd Stoat_migration
+   python importer.py
 ```
 2. The bot will show all servers that are scraped select the one you want to copy.
 
@@ -171,6 +172,7 @@ python importer.py
 | Attachments > 20MB | Link posted |
 | Author attribution | Yes |
 | Long messages | Trimmed to 2000 chars |
+| Replies | Yes |
 | Rate limits | Delay buffer in importer |
 
 ## Database Schema
