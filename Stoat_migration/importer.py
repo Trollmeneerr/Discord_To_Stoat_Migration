@@ -23,6 +23,7 @@ STOAT_LINK_TEMPLATE = "https://stoat.chat/server/{server}/channel/{channel}/{mes
 DISCORD_LINK_RE = re.compile(
     r"https://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)"
 )
+DISCORD_USER_MENTION_RE = re.compile(r"<@!?(\d+)>")
 
 # ────────────────────────────────────────────────────────────────────────────
 
@@ -127,6 +128,37 @@ DB_PATH = resolve_db_path()
 def get_db():
     """Open and return a connection to the Discord archive database."""
     return sqlite3.connect(DB_PATH)
+
+
+def load_user_lookup():
+    """
+    Build a Discord user ID -> username lookup from the archive database.
+    """
+    conn = get_db()
+    c = conn.cursor()
+    rows = c.execute("SELECT id, username, display_name FROM users").fetchall()
+    conn.close()
+
+    user_lookup = {}
+    for user_id, username, display_name in rows:
+        # Prefer username for stable @Username output; fallback to display_name.
+        user_lookup[str(user_id)] = username or display_name or "unknown-user"
+    return user_lookup
+
+
+def replace_discord_user_mentions(content, user_lookup):
+    """
+    Replace Discord user mention tokens (<@123> / <@!123>) with @username.
+    """
+    if not content:
+        return ""
+
+    def _replace(match):
+        user_id = match.group(1)
+        username = user_lookup.get(user_id)
+        return f"@{username}" if username else match.group(0)
+
+    return DISCORD_USER_MENTION_RE.sub(_replace, content)
 
 
 async def fetch_autumn_url(session):
@@ -258,7 +290,8 @@ async def edit_message(session, headers, channel_id, stoat_message_id, new_conte
 
 
 async def import_channel(session, headers, discord_channel_id, discord_channel_name,
-                         channel_type, discord_to_stoat_msg, discord_to_stoat_channel, autumn_url):
+                         channel_type, discord_to_stoat_msg, discord_to_stoat_channel,
+                         autumn_url, user_lookup):
     """
     Import one channel into Stoat.
     Populates discord_to_stoat_msg with {discord_msg_id: (stoat_channel_id, stoat_msg_id)}
@@ -326,8 +359,9 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
         date_str = format_message_timestamp(msg["timestamp"])
 
         # Message header with fixed spacing between username and date.
-        header = f"\n``{msg['username'].capitalize()} at: {date_str}``\n"
-        body = msg["content"].capitalize()
+        author_name = msg["username"] or "unknown-user"
+        header = f"\n``{author_name} at: {date_str}``\n"
+        body = replace_discord_user_mentions(msg["content"], user_lookup)
 
         # Process attachments — upload directly from local file,
         # or download from Discord CDN first if not saved locally, then upload.
@@ -503,6 +537,9 @@ async def main():
     print(f"[START] {len(text_channels)} text + {len(voice_channels)} voice channels to import")
     print(f"[START] Target Stoat server: {STOAT_SERVER}\n")
 
+    user_lookup = load_user_lookup()
+    print(f"[CONFIG] Loaded {len(user_lookup)} users for mention replacement")
+
     # Shared maps populated during Pass 1, consumed during Pass 2
     discord_to_stoat_msg     = {}  # discord_msg_id  → (stoat_channel_id, stoat_msg_id)
     discord_to_stoat_channel = {}  # discord_chan_id → stoat_channel_id
@@ -519,14 +556,14 @@ async def main():
         for channel_id, channel_name, channel_type in text_channels:
             await import_channel(
                 session, headers, channel_id, channel_name, channel_type,
-                discord_to_stoat_msg, discord_to_stoat_channel, autumn_url
+                discord_to_stoat_msg, discord_to_stoat_channel, autumn_url, user_lookup
             )
 
         print("\n[VOICE CHANNELS]")
         for channel_id, channel_name, channel_type in voice_channels:
             await import_channel(
                 session, headers, channel_id, channel_name, channel_type,
-                discord_to_stoat_msg, discord_to_stoat_channel, autumn_url
+                discord_to_stoat_msg, discord_to_stoat_channel, autumn_url, user_lookup
             )
 
         # ── PASS 2: Fix all message link redirects ────────────────────────
