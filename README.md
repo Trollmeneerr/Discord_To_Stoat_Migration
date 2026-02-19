@@ -22,12 +22,13 @@ Discord_To_Stoat_Migration/
 |-- Discord_scrape/
 |   |-- bot.py
 |   |-- query.py
-|   |-- requirements.txt
-|   `-- .env.example
+|   |-- .env.example
+|
 |-- Stoat_migration/
 |   |-- importer.py
-|   |-- requirements.txt
-|   `-- .env.example
+|   |-- .env.example
+|
+|-- requirements.txt
 `-- README.md
 ```
 
