@@ -1,10 +1,11 @@
 import asyncio
+from pyexpat.errors import messages
 import aiohttp
 import sqlite3
 import os
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 # Load environment variables from Stoat_migration/.env
@@ -17,6 +18,8 @@ STOAT_SERVER   = os.getenv("STOAT_SERVER_ID")
 STOAT_API      = "https://api.stoat.chat"       
 AUTUMN_API     = None                            
 DELAY          = 0.3 # (rate limit buffer)
+AUTHOR_HEADER_WINDOW = timedelta(minutes=5)
+REPLY_PREVIEW_MAX_CHARS = 15
 
 # link format template for automatic message link redirect
 STOAT_LINK_TEMPLATE = "https://stoat.chat/server/{server}/channel/{channel}/{message}"
@@ -108,7 +111,6 @@ def choose_db_from_menu(db_paths):
 
         print("Invalid selection. Enter a listed number.")
 
-
 def format_message_timestamp(raw_timestamp):
     """Format DB timestamp to DD/MM/YYYY HH:MM."""
     if not raw_timestamp:
@@ -121,6 +123,14 @@ def format_message_timestamp(raw_timestamp):
         # Fallback keeps predictable width even for unexpected timestamp formats.
         return raw_timestamp[:16].replace("T", " ")
 
+def parse_message_timestamp(raw_timestamp):
+    """Parse DB timestamp for time-window grouping logic."""
+    if not raw_timestamp:
+        return None
+    try:
+        return datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 DB_PATH = resolve_db_path()
 
@@ -355,13 +365,30 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
     print(f"  [~] Sending {len(messages)} messages...")
     count = 0
 
+    last_author_id = None
+    last_message_time = None
+
     for discord_msg_id, msg in messages.items():
+        message_time = parse_message_timestamp(msg["timestamp"])
+        author_id = msg["author_id"]
+        show_header = True
+
+        if (
+            author_id == last_author_id
+            and message_time is not None
+            and last_message_time is not None
+            and message_time >= last_message_time
+            and (message_time - last_message_time) <= AUTHOR_HEADER_WINDOW
+        ):
+            show_header = False
+
         date_str = format_message_timestamp(msg["timestamp"])
 
         # Message header with fixed spacing between username and date.
         author_name = msg["username"] or "unknown-user"
-        header = f"\n``{author_name} at: {date_str}``\n"
+        header = f"``{author_name} at: {date_str}``" if show_header else ""
         body = replace_discord_user_mentions(msg["content"], user_lookup)
+
 
         # Process attachments — upload directly from local file,
         # or download from Discord CDN first if not saved locally, then upload.
@@ -400,11 +427,8 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
 
         # Build full message — Discord links are left as-is for now,
         # the redirect pass will rewrite them after all messages are sent
-        full_message = header
-        if body:
-            full_message += body
-        if extra_links:
-            full_message += "\n" + "\n".join(extra_links)
+        full_parts = [part for part in (header, body, "\n".join(extra_links)) if part]
+        full_message = "\n".join(full_parts)
 
         # Stoat 2000 char limit
         if len(full_message) > 2000:
@@ -419,6 +443,8 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
             discord_to_stoat_msg[discord_msg_id] = (stoat_channel_id, stoat_msg_id)
 
         count += 1
+        last_author_id = author_id
+        last_message_time = message_time
         await asyncio.sleep(DELAY)
 
         if count % 50 == 0:
