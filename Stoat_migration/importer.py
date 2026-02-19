@@ -3,17 +3,18 @@ import aiohttp
 import sqlite3
 import os
 import re
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from Stoat_migration/.env
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 STOAT_TOKEN    = os.getenv("STOAT_TOKEN")       
 STOAT_SERVER   = os.getenv("STOAT_SERVER_ID")   
 STOAT_API      = "https://api.stoat.chat"       
 AUTUMN_API     = None                            
-DB_PATH        = "../Discord_scrape/discord_archive.db" 
 DELAY          = 0.5 # (rate limit buffer)
 
 # link format template for automatic message link redirect
@@ -23,6 +24,48 @@ DISCORD_LINK_RE = re.compile(
 )
 
 # ────────────────────────────────────────────────────────────────────────────
+
+
+def resolve_db_path():
+    """
+    Resolve the Discord archive DB path.
+    Priority:
+    1) DISCORD_ARCHIVE_DB_PATH
+    2) legacy Discord_scrape/discord_archive.db
+    3) newest Discord_scrape/archives/*/discord_archive.db
+    """
+    configured_path = (os.getenv("DISCORD_ARCHIVE_DB_PATH") or "").strip()
+    if configured_path:
+        candidate = Path(configured_path)
+        if not candidate.is_absolute():
+            candidate = (BASE_DIR / configured_path).resolve()
+        if candidate.exists():
+            return str(candidate)
+        raise RuntimeError(
+            f"DISCORD_ARCHIVE_DB_PATH is set but file does not exist: {candidate}"
+        )
+
+    legacy_path = (BASE_DIR / "../Discord_scrape/discord_archive.db").resolve()
+    if legacy_path.exists():
+        return str(legacy_path)
+
+    archives_root = (BASE_DIR / "../Discord_scrape/archives").resolve()
+    if archives_root.exists():
+        candidates = sorted(
+            archives_root.glob("*/discord_archive.db"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        if candidates:
+            return str(candidates[0])
+
+    raise RuntimeError(
+        "No Discord archive database found. Set DISCORD_ARCHIVE_DB_PATH in "
+        "Stoat_migration/.env or run Discord_scrape/bot.py first."
+    )
+
+
+DB_PATH = resolve_db_path()
 
 
 def get_db():
@@ -77,8 +120,10 @@ async def download_to_temp(session, url, filename):
     Returns the local filepath on success, or None on failure.
     Used when the archiver did not save the file locally.
     """
-    os.makedirs("../Discord/downloads", exist_ok=True)
-    filepath = os.path.join("../Discord/downloads", filename)
+    temp_dir = BASE_DIR / "temp_downloads"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = filename.replace("/", "_").replace("\\", "_")
+    filepath = temp_dir / safe_name
 
     try:
         async with session.get(url) as resp:
@@ -86,7 +131,7 @@ async def download_to_temp(session, url, filename):
                 with open(filepath, "wb") as f:
                     f.write(await resp.read())
                 print(f"  [DL] Downloaded {filename} from Discord CDN")
-                return filepath
+                return str(filepath)
             else:
                 print(f"  [WARN] Could not download {filename}: {resp.status}")
                 return None
@@ -385,6 +430,8 @@ async def main():
     if not STOAT_TOKEN or not STOAT_SERVER:
         print("[ERROR] Set STOAT_TOKEN and STOAT_SERVER_ID environment variables first!")
         return
+
+    print(f"[CONFIG] Using archive DB: {DB_PATH}")
 
     headers = {
         "x-bot-token": STOAT_TOKEN,

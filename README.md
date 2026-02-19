@@ -23,13 +23,14 @@ Discord_To_Stoat_Migration/
 |   |-- bot.py
 |   |-- validate.py
 |   |-- .env.example
+|   `-- archives/
+|       `-- <server_name>_<server_id>/
+|           |-- discord_archive.db
+|           `-- downloads/
 |
 |-- Stoat_migration/
 |   |-- importer.py
 |   |-- .env.example
-|
-|-- Discord/downloads/
-|   |-- Attachments.ext
 |
 |-- requirements.txt
 |-- README.md
@@ -109,6 +110,8 @@ cd Discord_scrape
 python bot.py
 ```
 
+The bot will show all servers it is in and prompt you to pick exactly one server before scraping.
+
 5. Optional: inspect archived data:
 
 ```bash
@@ -125,8 +128,10 @@ python importer.py
 ## Output
 
 After scraping:
-- `Discord_scrape/discord_archive.db`
-- `Discord_scrape/downloads/`
+- `Discord_scrape/archives/<server_name>_<server_id>/discord_archive.db`
+- `Discord_scrape/archives/<server_name>_<server_id>/downloads/`
+
+This keeps each server isolated and avoids mixed archives.
 
 ## What Gets Migrated
 
