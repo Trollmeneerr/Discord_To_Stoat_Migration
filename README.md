@@ -23,20 +23,21 @@ Discord_To_Stoat_Migration/
 |   |-- bot.py
 |   |-- validate.py
 |   |-- .env.example
-|   `-- archives/
-|       `-- <server_name>_<server_id>/
+|   |-- archives/
+|       |-- <server_name>_<server_id>/
 |           |-- discord_archive.db
-|           `-- downloads/
+|           |-- downloads/
 |
 |-- Stoat_migration/
 |   |-- importer.py
 |   |-- .env.example
 |
 |-- requirements.txt
+|-- setup.py
 |-- README.md
 ```
 
-## Manual Setup 
+## Setup
 
 ### 1. Create a Discord Bot
 
@@ -71,6 +72,17 @@ Discord_To_Stoat_Migration/
 6. Copy your Stoat Server ID from right clicking server icon. (You might need to enable this feature is advanced setting in your profile) 
 
 ### 3. Configure the project
+
+### Automatic
+
+1. Run:
+
+```bash
+python setup.py
+```
+2. Follow Instructions
+
+### Manual
 
 1. Install Python dependencies:
 
