@@ -5,10 +5,35 @@ import aiohttp
 import os
 import re
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv(".env")
 
 # Load token from environment variable
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = (os.getenv("DISCORD_TOKEN") or "").strip()
 
+
+def parse_message_limit(raw_value):
+    """
+    Parse DISCORD_MESSAGE_LIMIT:
+      - empty / unset / "none" => no limit (archive full history)
+      - positive integer => archive latest N messages per channel
+    """
+    value = (raw_value or "").strip().lower()
+    if not value or value == "none":
+        return None
+    try:
+        parsed = int(value)
+        if parsed <= 0:
+            raise ValueError
+        return parsed
+    except ValueError:
+        raise RuntimeError(
+            "DISCORD_MESSAGE_LIMIT must be a positive integer or 'none'. "
+            f"Received: {raw_value!r}"
+        )
+
+
+MESSAGE_LIMIT = parse_message_limit(os.getenv("DISCORD_MESSAGE_LIMIT"))
 DISCORD_LINK_RE = re.compile(
     r"https://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)"
 )
@@ -156,54 +181,71 @@ async def archive_channel(channel, conn, session, channel_type="text"):
     count = 0
     redirect_count = 0
 
+    if MESSAGE_LIMIT is None:
+        print("    [CFG] Message mode: full history")
+    else:
+        print(f"    [CFG] Message mode: latest {MESSAGE_LIMIT}")
+
+    async def process_message(message):
+        nonlocal count, redirect_count
+
+        # Save user
+        c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?)",
+                  (str(message.author.id),
+                   str(message.author.name),
+                   str(message.author.display_name)))
+
+        has_attachments = 1 if message.attachments else 0
+
+        # Save message
+        c.execute("INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)",
+                  (str(message.id),
+                   str(channel.id),
+                   str(channel.guild.id),
+                   str(message.author.id),
+                   message.content,
+                   message.created_at.isoformat(),
+                   has_attachments))
+
+        # Detect and save any Discord message links in the content
+        redirects = extract_redirects(str(message.id), message.content)
+        for r in redirects:
+            c.execute(
+                "INSERT INTO redirects (source_message_id, linked_guild_id, linked_channel_id, linked_message_id, original_url) VALUES (?, ?, ?, ?, ?)",
+                r
+            )
+            redirect_count += 1
+
+        # Save and download attachments (videos, images, files)
+        for attachment in message.attachments:
+            local_path = await download_attachment(
+                session, attachment.url, f"{attachment.id}_{attachment.filename}"
+            )
+            c.execute("INSERT OR IGNORE INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      (str(attachment.id),
+                       str(message.id),
+                       attachment.filename,
+                       attachment.url,
+                       attachment.content_type or "unknown",
+                       attachment.size,
+                       local_path))
+
+        count += 1
+        if count % 500 == 0:
+            conn.commit()
+            print(f"    [~] {count} messages saved...")
+
     try:
-        async for message in channel.history(limit=None, oldest_first=True):
-
-            # Save user
-            c.execute("INSERT OR IGNORE INTO users VALUES (?, ?, ?)",
-                      (str(message.author.id),
-                       str(message.author.name),
-                       str(message.author.display_name)))
-
-            has_attachments = 1 if message.attachments else 0
-
-            # Save message
-            c.execute("INSERT OR IGNORE INTO messages VALUES (?, ?, ?, ?, ?, ?, ?)",
-                      (str(message.id),
-                       str(channel.id),
-                       str(channel.guild.id),
-                       str(message.author.id),
-                       message.content,
-                       message.created_at.isoformat(),
-                       has_attachments))
-
-            # Detect and save any Discord message links in the content
-            redirects = extract_redirects(str(message.id), message.content)
-            for r in redirects:
-                c.execute(
-                    "INSERT INTO redirects (source_message_id, linked_guild_id, linked_channel_id, linked_message_id, original_url) VALUES (?, ?, ?, ?, ?)",
-                    r
-                )
-                redirect_count += 1
-
-            # Save and download attachments (videos, images, files)
-            for attachment in message.attachments:
-                local_path = await download_attachment(
-                    session, attachment.url, f"{attachment.id}_{attachment.filename}"
-                )
-                c.execute("INSERT OR IGNORE INTO attachments VALUES (?, ?, ?, ?, ?, ?, ?)",
-                          (str(attachment.id),
-                           str(message.id),
-                           attachment.filename,
-                           attachment.url,
-                           attachment.content_type or "unknown",
-                           attachment.size,
-                           local_path))
-
-            count += 1
-            if count % 500 == 0:
-                conn.commit()
-                print(f"    [~] {count} messages saved...")
+        if MESSAGE_LIMIT is None:
+            async for message in channel.history(limit=None, oldest_first=True):
+                await process_message(message)
+        else:
+            # Fetch latest N first, then process in chronological order.
+            latest_messages = [
+                message async for message in channel.history(limit=MESSAGE_LIMIT, oldest_first=False)
+            ]
+            for message in reversed(latest_messages):
+                await process_message(message)
 
     except discord.errors.HTTPException as e:
         # Voice channels with no text history return 400 — that's fine
@@ -259,4 +301,9 @@ async def on_ready():
 
 
 # Run the bot
+if not TOKEN:
+    raise RuntimeError(
+        "DISCORD_TOKEN is missing. Set it in Discord_scrape/.env (DISCORD_TOKEN=...) and run again."
+    )
+
 client.run(TOKEN)

@@ -95,7 +95,12 @@ cp Stoat_migration/.env.example Stoat_migration/.env
 ```env
 # Discord_scrape/.env
 DISCORD_TOKEN=your_discord_bot_token
+DISCORD_MESSAGE_LIMIT=none
 ```
+
+`DISCORD_MESSAGE_LIMIT` options:
+- `none` (or empty): archive full history
+- positive integer (for example `100`): archive latest N messages per channel
 
 ```env
 # Stoat_migration/.env
