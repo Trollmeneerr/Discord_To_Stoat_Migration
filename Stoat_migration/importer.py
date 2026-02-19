@@ -4,6 +4,7 @@ import sqlite3
 import os
 import re
 from pathlib import Path
+from datetime import datetime
 from dotenv import load_dotenv
 
 # Load environment variables from Stoat_migration/.env
@@ -15,10 +16,10 @@ STOAT_TOKEN    = os.getenv("STOAT_TOKEN")
 STOAT_SERVER   = os.getenv("STOAT_SERVER_ID")   
 STOAT_API      = "https://api.stoat.chat"       
 AUTUMN_API     = None                            
-DELAY          = 0.5 # (rate limit buffer)
+DELAY          = 0.3 # (rate limit buffer)
 
 # link format template for automatic message link redirect
-STOAT_LINK_TEMPLATE = "https://stoat.chat/server/{server}/{channel}#{message}"
+STOAT_LINK_TEMPLATE = "https://stoat.chat/server/{server}/channel/{channel}/{message}"
 DISCORD_LINK_RE = re.compile(
     r"https://discord(?:app)?\.com/channels/(\d+)/(\d+)/(\d+)"
 )
@@ -45,24 +46,79 @@ def resolve_db_path():
             f"DISCORD_ARCHIVE_DB_PATH is set but file does not exist: {candidate}"
         )
 
+    candidates = []
+
     legacy_path = (BASE_DIR / "../Discord_scrape/discord_archive.db").resolve()
     if legacy_path.exists():
-        return str(legacy_path)
+        candidates.append(legacy_path)
 
     archives_root = (BASE_DIR / "../Discord_scrape/archives").resolve()
     if archives_root.exists():
-        candidates = sorted(
+        archive_candidates = sorted(
             archives_root.glob("*/discord_archive.db"),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )
-        if candidates:
-            return str(candidates[0])
+        candidates.extend(archive_candidates)
+
+    # De-duplicate while preserving order.
+    deduped = []
+    seen = set()
+    for path in candidates:
+        as_str = str(path)
+        if as_str in seen:
+            continue
+        seen.add(as_str)
+        deduped.append(path)
+
+    if len(deduped) == 1:
+        return str(deduped[0])
+    if len(deduped) > 1:
+        return str(choose_db_from_menu(deduped))
 
     raise RuntimeError(
         "No Discord archive database found. Set DISCORD_ARCHIVE_DB_PATH in "
         "Stoat_migration/.env or run Discord_scrape/bot.py first."
     )
+
+
+def choose_db_from_menu(db_paths):
+    """Simple terminal menu to choose which archive DB to import."""
+    print("\n[SELECT] Multiple archive databases found. Choose one to import:")
+    for idx, db_path in enumerate(db_paths, start=1):
+        try:
+            shown = db_path.relative_to(BASE_DIR.parent)
+        except ValueError:
+            shown = db_path
+        print(f"  {idx}. {shown}")
+
+    while True:
+        raw = input("Enter database number (or 'q' to quit): ").strip().lower()
+
+        if raw in {"q", "quit", "exit"}:
+            raise SystemExit("Aborted by user.")
+
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(db_paths):
+                selected = db_paths[index - 1]
+                print(f"[SELECT] Using DB: {selected}")
+                return selected
+
+        print("Invalid selection. Enter a listed number.")
+
+
+def format_message_timestamp(raw_timestamp):
+    """Format DB timestamp to DD/MM/YYYY HH:MM."""
+    if not raw_timestamp:
+        return "00/00/0000 00:00"
+
+    try:
+        dt = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+        return dt.strftime("%d-%m-%Y %H:%M")
+    except ValueError:
+        # Fallback keeps predictable width even for unexpected timestamp formats.
+        return raw_timestamp[:16].replace("T", " ")
 
 
 DB_PATH = resolve_db_path()
@@ -267,12 +323,11 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
     count = 0
 
     for discord_msg_id, msg in messages.items():
-        # Format timestamp e.g. "2024-03-15 14:32:01"
-        date_str = msg["timestamp"][:19].replace("T", " ")
+        date_str = format_message_timestamp(msg["timestamp"])
 
-        # Message header with full Discord attribution
-        header = f"[From: {msg['username']} | {date_str}]\n"
-        body = msg["content"]
+        # Message header with fixed spacing between username and date.
+        header = f"\n``{msg['username'].capitalize()} at: {date_str}``\n"
+        body = msg["content"].capitalize()
 
         # Process attachments — upload directly from local file,
         # or download from Discord CDN first if not saved locally, then upload.
