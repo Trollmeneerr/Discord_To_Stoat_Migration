@@ -21,28 +21,21 @@ Archive a Discord server into SQLite, then import it into Stoat.
 Discord_To_Stoat_Migration/
 |-- Discord_scrape/
 |   |-- bot.py
-|   |-- query.py
+|   |-- validate.py
 |   |-- .env.example
 |
 |-- Stoat_migration/
 |   |-- importer.py
 |   |-- .env.example
 |
+|-- Discord/downloads/
+|   |-- Attachments.ext
+|
 |-- requirements.txt
-`-- README.md
+|-- README.md
 ```
 
-## Migration Flow
-
-```text
-Discord Server
-  -> Discord_scrape/bot.py
-  -> Discord_scrape/discord_archive.db + downloads/
-  -> Stoat_migration/importer.py
-  -> Stoat Server
-```
-
-## Setup 
+## Manual Setup 
 
 ### 1. Create a Discord Bot
 
