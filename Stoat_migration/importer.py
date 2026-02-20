@@ -16,7 +16,7 @@ STOAT_TOKEN    = os.getenv("STOAT_TOKEN")
 STOAT_SERVER   = os.getenv("STOAT_SERVER_ID")   
 STOAT_API      = "https://api.stoat.chat"       
 AUTUMN_API     = None                            
-DELAY          = 0.3 # (rate limit buffer)
+DELAY          = 0.8 # (rate limit buffer)
 AUTHOR_HEADER_WINDOW = timedelta(minutes=5)
 REPLY_PREVIEW_MAX_CHARS = 15
 
