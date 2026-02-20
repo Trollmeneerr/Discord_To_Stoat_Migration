@@ -34,76 +34,110 @@ Discord_To_Stoat_Migration/
 |
 |-- requirements.txt
 |-- setup.py
+|-- automatic_setup_server.py
+|-- automatic_setup_client.html
 |-- README.md
 ```
 
-## Setup
+## Prerequisites
 
-### 1. Create a Discord Bot
+- Python 3.14 recommended (3.9+ supported)
+- pip (included with Python)
+- SQLite (bundled with Python)
 
-1. Go to: [https://discord.com/developers/applications](https://discord.com/developers/applications)
-2. Create **New Application → Bot_Name**
-3. Go to Bot
-4. Copy the bot token
-5. Enable **Privileged Gateway Intents**:
+Install Python 3.14 from the official release page:
+https://www.python.org/downloads/release/python-3140/
 
-   * ✅ Server Members Intent
-   * ✅ Message Content Intent
+## Required Tokens and IDs
 
-6. Go to **OAuth2**
+You need all of these before setup:
+- Discord bot token (source server)
+- Stoat bot token (target server)
+- Stoat server ID (target server)
 
-7. Generate bot link with:
-   * Redirects -> http://localhost:5328/callback (Use a port that is not used)
-   * Scopes -> **bot**
-   * Permission -> **Read Message History**
+### Create Discord Bot
 
-8. Copy the generated URL and paste it into your browser
----
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications).
+2. Create a new application and open the Bot section.
+3. Copy the bot token.
+4. Enable privileged intents:
+- Server Members Intent
+- Message Content Intent
+5. In OAuth2, generate an invite link with:
+- Scope: `bot`
+- Permission: `Read Message History`
+6. Open the generated link and invite the bot to your Discord server.
 
-### 2. Configure Stoat
+### Create Stoat Bot
 
-1. Log in at `https://stoat.chat`
+1. Log in at `https://stoat.chat`.
 2. Go to Settings -> Bots -> Create Bot.
 3. Copy the Stoat bot token.
 4. Invite the bot to your Stoat server.
-5. Ensure bot permissions include:
+5. Ensure permissions include:
 - `Manage Channels`
 - `Send Messages`
-6. Copy your Stoat Server ID from right clicking server icon. (You might need to enable this feature is advanced setting in your profile) 
+6. Copy your Stoat server ID (developer mode may be required).
 
----
-### 3. Configure the project
+## Setup
 
-#### Automatic
+Choose one setup method.
 
-1. Run:
+### Option A: Web Setup (Recommended)
 
-```bash
-   python setup.py
-```
-2. Follow Instructions
-
-3. Go to https://github.com/Trollmeneerr/Discord_To_Stoat_Migration?tab=readme-ov-file#run-the-code
-
-#### Manual
-
-1. Install Python dependencies:
+1. Start the local web setup server:
 
 ```bash
-   pip install -r requirements.txt
+python automatic_setup_server.py
 ```
 
-2. Create env files:
+2. Open in web browser:
+
+```text
+http://127.0.0.1:8080
+```
+
+3. In the page:
+- Fill tokens and server ID
+- Click `Save + Install Dependencies`
+- Then run the scripts in the embedded terminal in order:
+   1. Run Discord Scraper
+   2. Run validate.py
+   3. Run Stoat Importer
+
+If youi are in more then 1 server you need to input a number according to the prompt.
+
+The web page can:
+- Save `Discord_scrape/.env` and `Stoat_migration/.env`
+- Install dependencies
+- Run `setup.py`, `Discord_scrape/bot.py`, `Discord_scrape/validate.py`, `Stoat_migration/importer.py`
+- Send interactive input to running scripts
+
+### Option B: Manual Setup
+
+1. Install dependencies:
 
 ```bash
-   cp Discord_scrape/.env.example Discord_scrape/.env
-   cp Stoat_migration/.env.example Stoat_migration/.env
+pip install -r requirements.txt
 ```
 
-3.a Fill env values for Discord:
+2. Create `.env` files:
+
+```bash
+cp Discord_scrape/.env.example Discord_scrape/.env
+cp Stoat_migration/.env.example Stoat_migration/.env
+```
+
+PowerShell alternative:
+
+```powershell
+Copy-Item Discord_scrape/.env.example Discord_scrape/.env
+Copy-Item Stoat_migration/.env.example Stoat_migration/.env
+```
+
+3. Fill Discord values in `Discord_scrape/.env`:
 
 ```env
-# Discord_scrape/.env
 DISCORD_TOKEN=your_discord_bot_token
 DISCORD_MESSAGE_LIMIT=none
 ```
@@ -112,55 +146,50 @@ DISCORD_MESSAGE_LIMIT=none
 - `none` (or empty): archive full history
 - positive integer (for example `100`): archive latest N messages per channel
 
+4. Fill Stoat values in `Stoat_migration/.env`:
 
-3.b Fill env values for Stoat 
 ```env
-# Stoat_migration/.env
 STOAT_TOKEN=your_stoat_bot_token
 STOAT_SERVER_ID=your_stoat_server_id
 ```
 
-## Run The Code:
-
-### Running The Discord Scraper
-
-1. Go to the Discord_scrape directory and run bot.py:
+Optional interactive CLI setup:
 
 ```bash
-   cd Discord_scrape
-   python bot.py
+python setup.py
 ```
 
-The bot will show all servers it is in and prompt you to pick exactly one server before scraping.
+## Run the Migration
 
-2. Optional: inspect archived data:
+### 1. Run Discord Scraper
 
 ```bash
-   python validate.py
+cd Discord_scrape
+python bot.py
 ```
 
-#### Output
+The bot will show all servers it is in and prompt you to choose one server.
 
-After scraping:
+Optional: inspect archive data
+
+```bash
+python validate.py
+```
+
+Output after scraping:
 - `Discord_scrape/archives/<server_name>_<server_id>/discord_archive.db`
 - `Discord_scrape/archives/<server_name>_<server_id>/downloads/`
 
-This keeps each server isolated and avoids mixed archives.
-
-### Running the Stoat Importer
-
-1. Go to the Stoat_migration directory and run importer.py
+### 2. Run Stoat Importer
 
 ```bash
-   # If you are still in \Discord_scrape>:
-   # run: cd ..
-   cd Stoat_migration
-   python importer.py
+cd Stoat_migration
+python importer.py
 ```
-2. The bot will show all servers that are scraped select the one you want to copy.
 
-#####  Make Sure the Server_ID is correct before importing! 
+The importer will ask you to choose the scraped archive database if multiple are found.
 
+Make sure `STOAT_SERVER_ID` is correct before importing.
 
 ## What Gets Migrated
 
@@ -183,21 +212,20 @@ This keeps each server isolated and avoids mixed archives.
 | channels | All channels |
 | users | Message authors |
 | messages | Message content |
-| attachments | File metadata (None, bc discord doesn't save it either) |
+| attachments | File metadata |
 | redirects | Discord link rewrite mapping |
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.14 recommended (3.9+ supported)
 - SQLite (bundled with Python)
 
 ## License
 
-MIT License — feel free to modify and use.
-
----
+MIT License - feel free to modify and use.
 
 ## Author
+
 Trollmeneerr
 
---Contains AI Generated content--
+Contains AI-generated content.

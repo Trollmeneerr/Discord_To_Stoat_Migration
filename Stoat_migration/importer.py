@@ -3,9 +3,30 @@ import aiohttp
 import sqlite3
 import os
 import re
+import sys
 from pathlib import Path
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+
+
+def configure_stdio() -> None:
+    """
+    Avoid UnicodeEncodeError on Windows consoles that default to cp1252.
+    Prefer UTF-8, and always fall back to replacement mode instead of crashing.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if stream is None or not hasattr(stream, "reconfigure"):
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            try:
+                stream.reconfigure(errors="replace")
+            except Exception:
+                pass
+
+
+configure_stdio()
 
 # Load environment variables from Stoat_migration/.env
 BASE_DIR = Path(__file__).resolve().parent
@@ -16,7 +37,7 @@ STOAT_TOKEN    = os.getenv("STOAT_TOKEN")
 STOAT_SERVER   = os.getenv("STOAT_SERVER_ID")   
 STOAT_API      = "https://api.stoat.chat"       
 AUTUMN_API     = None                            
-DELAY          = 0.8 # (rate limit buffer)
+DELAY          = 1 # (rate limit buffer)
 AUTHOR_HEADER_WINDOW = timedelta(minutes=5)
 REPLY_PREVIEW_MAX_CHARS = 15
 
@@ -481,7 +502,7 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
 
         # Message header with fixed spacing between username and date.
         author_name = msg["username"] or "unknown-user"
-        header = f"``{author_name} at: {date_str}``" if show_header else ""
+        header = f"**{author_name}** ({date_str}))" if show_header else ""
         body = replace_discord_user_mentions(msg["content"], user_lookup)
         reply_context = format_reply_context(msg, user_lookup)
 
