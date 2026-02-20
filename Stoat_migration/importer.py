@@ -502,7 +502,7 @@ async def import_channel(session, headers, discord_channel_id, discord_channel_n
 
         # Message header with fixed spacing between username and date.
         author_name = msg["username"] or "unknown-user"
-        header = f"**{author_name}** ({date_str}))" if show_header else ""
+        header = f"**{author_name}** ({date_str})" if show_header else ""
         body = replace_discord_user_mentions(msg["content"], user_lookup)
         reply_context = format_reply_context(msg, user_lookup)
 
