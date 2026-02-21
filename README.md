@@ -85,6 +85,8 @@ Choose one setup method.
 
 ### Option A: Web Setup (Recommended)
 
+In your terminal of the folder. (Open terminal in file explorer)
+
 1. Start the local web setup server:
 
 ```bash
