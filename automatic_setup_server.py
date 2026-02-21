@@ -20,9 +20,11 @@ DISCORD_ENV_PATH = ROOT_DIR / "Discord_scrape" / ".env"
 STOAT_ENV_PATH = ROOT_DIR / "Stoat_migration" / ".env"
 
 PACKAGES_TO_INSTALL = [
-    "discord.py==2.3.2",
-    "aiohttp==3.9.1",
-    "python-dotenv==0.19.2",
+    "discord",
+    "aiohttp",
+    "python-dotenv",
+    "certifi",
+    
 ]
 
 SCRIPT_TARGETS = {
