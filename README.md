@@ -64,6 +64,7 @@ You need all of these before setup:
 - Server Members Intent
 - Message Content Intent
 5. In OAuth2, generate an invite link with:
+- Redirect: `http://localhost:5000/redirect`
 - Scope: `bot`
 - Permission: `Read Message History`
 6. Open the generated link and invite the bot to your Discord server.

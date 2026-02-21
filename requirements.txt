@@ -1,5 +1,5 @@
-discord.py==2.3.2
-aiohttp==3.9.1
-sqlite3
-python-dotenv==0.19.2
-re
+discord
+aiohttp
+python-dotenv
+dotenv
+certifi
